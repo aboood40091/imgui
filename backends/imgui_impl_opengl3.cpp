@@ -488,13 +488,13 @@ void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
                     continue;
 
-#ifdef IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT
+#if defined(IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT) && !defined(IMGUI_IMPL_OPENGL_SCISSOR_INVERTED)
                 // Apply scissor/clipping rectangle
                 glScissor((int)clip_min.x, (int)clip_min.y, (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y));
 #else
                 // Apply scissor/clipping rectangle (Y is inverted in OpenGL)
                 glScissor((int)clip_min.x, (int)((float)fb_height - clip_max.y), (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y));
-#endif // IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT
+#endif
 
                 // Bind texture, Draw
                 glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->GetTexID());
