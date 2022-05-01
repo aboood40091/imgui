@@ -17591,10 +17591,6 @@ static void MetricsHelpMarker(const char* desc)
     }
 }
 
-#ifndef IMGUI_DISABLE_DEMO_WINDOWS
-namespace ImGui { void ShowFontAtlas(ImFontAtlas* atlas); }
-#endif
-
 void ImGui::ShowMetricsWindow(bool* p_open)
 {
     ImGuiContext& g = *GImGui;

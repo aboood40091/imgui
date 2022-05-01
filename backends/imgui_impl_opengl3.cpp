@@ -337,7 +337,7 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
 #endif
 
     // Support for GL 4.5 rarely used glClipControl(GL_UPPER_LEFT)
-#if defined(GL_CLIP_ORIGIN)
+#if !defined(IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT) && defined(GL_CLIP_ORIGIN)
     bool clip_origin_lower_left = true;
     if (bd->HasClipOrigin)
     {
@@ -354,7 +354,7 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
     float R = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
     float T = draw_data->DisplayPos.y;
     float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
-#if defined(GL_CLIP_ORIGIN)
+#if !defined(IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT) && defined(GL_CLIP_ORIGIN)
     if (!clip_origin_lower_left) { float tmp = T; T = B; B = tmp; } // Swap top and bottom if origin is upper left
 #endif
     const float ortho_projection[4][4] =
@@ -488,8 +488,13 @@ void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
                     continue;
 
+#ifdef IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT
+                // Apply scissor/clipping rectangle
+                glScissor((int)clip_min.x, (int)clip_min.y, (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y));
+#else
                 // Apply scissor/clipping rectangle (Y is inverted in OpenGL)
                 glScissor((int)clip_min.x, (int)((float)fb_height - clip_max.y), (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y));
+#endif // IMGUI_IMPL_OPENGL_ORIGIN_TOP_LEFT
 
                 // Bind texture, Draw
                 glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->GetTexID());
