@@ -24,6 +24,7 @@
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
 //  2023-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
+//  2023-11-23: OpenGL: Removed broken "support" for GL 4.5's glClipControl(GL_UPPER_LEFT) / GL_CLIP_ORIGIN.
 //  2023-11-08: OpenGL: Update GL3W based imgui_impl_opengl3_loader.h to load "libGL.so" instead of "libGL.so.1", accomodating for NetBSD systems having only "libGL.so.3" available. (#6983)
 //  2023-10-05: OpenGL: Rename symbols in our internal loader so that LTO compilation with another copy of gl3w is possible. (#6875, #6668, #4445)
 //  2023-06-20: OpenGL: Fixed erroneous use glGetIntegerv(GL_CONTEXT_PROFILE_MASK) on contexts lower than 3.2. (#6539, #6333)
@@ -197,11 +198,6 @@
 #define IMGUI_IMPL_OPENGL_MAY_HAVE_PRIMITIVE_RESTART
 #endif
 
-// Desktop GL use extension detection
-#if !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
-#define IMGUI_IMPL_OPENGL_MAY_HAVE_EXTENSIONS
-#endif
-
 // [Debugging]
 //#define IMGUI_IMPL_OPENGL_DEBUG
 #ifdef IMGUI_IMPL_OPENGL_DEBUG
@@ -230,7 +226,6 @@ struct ImGui_ImplOpenGL3_Data
     unsigned int    VboHandle, ElementsHandle;
     GLsizeiptr      VertexBufferSize;
     GLsizeiptr      IndexBufferSize;
-    bool            HasClipOrigin;
     bool            UseBufferSubData;
 
     ImGui_ImplOpenGL3_Data() { memset((void*)this, 0, sizeof(*this)); }
@@ -363,19 +358,6 @@ bool    ImGui_ImplOpenGL3_Init(const char* glsl_version)
     GLint current_texture;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
 
-    // Detect extensions we support
-    bd->HasClipOrigin = (bd->GlVersion >= 450);
-#ifdef IMGUI_IMPL_OPENGL_MAY_HAVE_EXTENSIONS
-    GLint num_extensions = 0;
-    glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
-    for (GLint i = 0; i < num_extensions; i++)
-    {
-        const char* extension = (const char*)glGetStringi(GL_EXTENSIONS, i);
-        if (extension != nullptr && strcmp(extension, "GL_ARB_clip_control") == 0)
-            bd->HasClipOrigin = true;
-    }
-#endif
-
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         ImGui_ImplOpenGL3_InitPlatformInterface();
 
@@ -425,17 +407,6 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 
-    // Support for GL 4.5 rarely used glClipControl(GL_UPPER_LEFT)
-#if defined(GL_CLIP_ORIGIN)
-    bool clip_origin_lower_left = true;
-    if (bd->HasClipOrigin)
-    {
-        GLenum current_clip_origin = 0; glGetIntegerv(GL_CLIP_ORIGIN, (GLint*)&current_clip_origin);
-        if (current_clip_origin == GL_UPPER_LEFT)
-            clip_origin_lower_left = false;
-    }
-#endif
-
     // Setup viewport, orthographic projection matrix
     // Our visible imgui space lies from draw_data->DisplayPos (top left) to draw_data->DisplayPos+data_data->DisplaySize (bottom right). DisplayPos is (0,0) for single viewport apps.
     GL_CALL(glViewport(0, 0, (GLsizei)fb_width, (GLsizei)fb_height));
@@ -443,9 +414,6 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
     float R = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
     float T = draw_data->DisplayPos.y;
     float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
-#if defined(GL_CLIP_ORIGIN)
-    if (!clip_origin_lower_left) { float tmp = T; T = B; B = tmp; } // Swap top and bottom if origin is upper left
-#endif
     const float ortho_projection[4][4] =
     {
         { 2.0f/(R-L),   0.0f,         0.0f,   0.0f },
@@ -481,7 +449,7 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
 // OpenGL3 Render function.
 // Note that this implementation is little overcomplicated because we are saving/setting up/restoring every OpenGL state explicitly.
 // This is in order to be able to run within an OpenGL engine that doesn't do so.
-void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
+void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data, bool window)
 {
     // Avoid rendering when minimized, scale coordinates for retina displays (screen coordinates != framebuffer coordinates)
     int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
@@ -599,8 +567,20 @@ void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
                     continue;
 
-                // Apply scissor/clipping rectangle (Y is inverted in OpenGL)
-                GL_CALL(glScissor((int)clip_min.x, (int)((float)fb_height - clip_max.y), (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
+#ifdef RIO_WIN_GL_SCISSOR_INVERTED
+                if (true)
+#else
+                if (window)
+#endif // RIO_WIN_GL_SCISSOR_INVERTED
+                {
+                    // Apply scissor/clipping rectangle (Y is inverted in OpenGL)
+                    GL_CALL(glScissor((int)clip_min.x, (int)((float)fb_height - clip_max.y), (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
+                }
+                else
+                {
+                    // Apply scissor/clipping rectangle
+                    GL_CALL(glScissor((int)clip_min.x, (int)clip_min.y, (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
+                }
 
                 // Bind texture, Draw
                 GL_CALL(glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->GetTexID()));
@@ -960,7 +940,7 @@ static void ImGui_ImplOpenGL3_RenderWindow(ImGuiViewport* viewport, void*)
         glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
     }
-    ImGui_ImplOpenGL3_RenderDrawData(viewport->DrawData);
+    ImGui_ImplOpenGL3_RenderDrawData(viewport->DrawData, true);
 }
 
 static void ImGui_ImplOpenGL3_InitPlatformInterface()
